@@ -152,6 +152,7 @@ is exactly as durable as one it does.
 | `hoverEffect` | `"magnify"` | `magnify`, `lift`, or `none`. |
 | `iconMode` | `"icons"` | What each tile draws: `none`, `icons`, or `nerdfont`. |
 | `transitionEffect` | `"fade"` | `fade`, `blur`, `zoom`, `slide`, `glitch`, or `none`. |
+| `reserveSpace` | `false` | `false` overlays the dock on top of windows; `true` reserves its thickness as a layer-shell exclusive zone, pushing other windows clear like a taskbar. |
 | `autoHide` | `false` | Collapse to a thin edge sliver and reveal on hover. |
 | `showFloating` | `true` | Include floating windows, drawn with a dashed outline. |
 | `dimInactive` | `true` | Fade every tile except the focused window. |
@@ -197,8 +198,11 @@ reveal, workspace-switch transitions); `DockCell.qml` is one window tile;
 
 ## Notes
 
-- Floats over windows (`ExclusionMode.Ignore`) rather than reserving screen
-  space, so auto-hiding never reflows your other windows.
+- Floats over windows (`ExclusionMode.Ignore`) by default rather than
+  reserving screen space, so auto-hiding never reflows your other windows.
+  Flip `reserveSpace` on (settings panel or shell.json) to reserve the dock's
+  thickness as a layer-shell exclusive zone instead — combined with
+  `autoHide`, other windows will reflow live as the dock collapses/reveals.
 - `blur` and `glitch` both use Qt6's `QtQuick.Effects.MultiEffect` (blur, and
   `colorization` for glitch's red/blue ghosts); every other effect is plain
   `Item`/`Rectangle` property animations.

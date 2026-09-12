@@ -27,8 +27,39 @@ Item {
   readonly property string pluginId: String((manifest && manifest.id) || "jgarza.scrolldock")
 
   // ── Config (this plugin's object entry in shell.json's `plugins` array) ──
+  // Panel-kind plugins are never handed shell.json content by the Omarchy
+  // loader (only bar widgets get an injected settings object), and `shell`
+  // here is `PluginShellApi` — a capability-scoped surface with
+  // `updateEntryInline()` for writing but no `shellConfig` to read back. So,
+  // same as the community `rosakodu.dock` plugin, this reads shell.json
+  // itself via a FileView; `watchChanges` picks up both external hand-edits
+  // and our own writes (which land in this same file) live.
+  readonly property string shellConfigPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
+  property var shellConfigParsed: null
+
+  function reloadShellConfig() {
+    try {
+      var raw = shellConfigFile.text()
+      root.shellConfigParsed = raw ? JSON.parse(raw) : null
+    } catch (e) {
+      root.shellConfigParsed = null
+    }
+  }
+
+  FileView {
+    id: shellConfigFile
+    path: root.shellConfigPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.reloadShellConfig()
+    onFileChanged: {
+      reload()
+      root.reloadShellConfig()
+    }
+  }
+
   readonly property var pluginEntry: {
-    var cfg = shell && shell.shellConfig ? shell.shellConfig : null
+    var cfg = root.shellConfigParsed
     var plugins = cfg && Array.isArray(cfg.plugins) ? cfg.plugins : []
     for (var i = 0; i < plugins.length; i++)
       if (plugins[i] && String(plugins[i].id || "") === root.pluginId)
@@ -91,6 +122,11 @@ Item {
   readonly property real magnifyScale: Math.max(1, Math.min(2.2, Number(root.opt("magnifyScale", 1.35))))
   readonly property int magnifyRadius: Math.max(20, Math.round(Number(root.opt("magnifyRadius", 80))))
 
+  // Off by default (overlay), matching the dock's original always-floats
+  // behaviour — on flips the panel to a reserved layer-shell exclusive zone
+  // (`ExclusionMode.Auto` in DockPanel), so other windows are pushed clear of
+  // it like a taskbar instead of it drawing on top of them.
+  property bool reserveSpace: root.opt("reserveSpace", false) === true
   property bool autoHide: root.opt("autoHide", false) === true
   readonly property int autoHideDelayMs: Math.max(0, Math.round(Number(root.opt("autoHideDelayMs", 400))))
   readonly property int revealMs: Math.max(0, Math.round(Number(root.opt("revealMs", 160))))
@@ -151,12 +187,39 @@ Item {
       root.openSettings(screen)
   }
 
-  // Write one key back into this plugin's shell.json entry. The in-memory
+  // Every setting the settings panel can change, read live off `root` (not
+  // off `pluginEntry`) so a write is never at the mercy of `pluginEntry`
+  // being momentarily stale or unresolved (e.g. right after a shell
+  // restart, before `shellConfigFile` has finished its first async load) —
+  // that race used to silently drop whichever settings weren't in
+  // `pluginEntry` yet the moment a *different* one was changed.
+  function allSettings() {
+    return {
+      edge: root.edge,
+      size: root.size,
+      opacity: root.bgOpacity,
+      monitor: root.monitorFilter,
+      iconMode: root.iconMode,
+      hoverEffect: root.hoverEffect,
+      transitionEffect: root.transitionEffect,
+      reserveSpace: root.reserveSpace,
+      autoHide: root.autoHide,
+      showFloating: root.showFloating,
+      dimInactive: root.dimInactive,
+      animate: root.animate,
+      middleClickClose: root.middleClickClose
+    }
+  }
+
+  // Write the full settings snapshot back into this plugin's shell.json
+  // entry (not just the one changed key) — `pluginEntry` is merged in
+  // underneath so shell.json-only keys this panel never touches (`minCell`,
+  // `gap`, `perMonitor`, …) still round-trip untouched. The in-memory
   // property is the source of truth for the running shell; this just makes
   // the change survive a restart.
   function persistSetting(key, value) {
     if (root.shell && typeof root.shell.updateEntryInline === "function") {
-      var cur = Object.assign({ id: root.pluginId }, root.pluginEntry || {})
+      var cur = Object.assign({ id: root.pluginId }, root.pluginEntry || {}, root.allSettings())
       cur[key] = value
       root.shell.updateEntryInline(root.pluginId, cur)
     }
@@ -203,6 +266,10 @@ Item {
       || v === "zoom" || v === "glitch") ? v : "fade"
     root.persistSetting("transitionEffect", root.transitionEffect)
   }
+  function setReserveSpace(value) {
+    root.reserveSpace = value === true
+    root.persistSetting("reserveSpace", root.reserveSpace)
+  }
   function setAutoHide(value) {
     root.autoHide = value === true
     root.persistSetting("autoHide", root.autoHide)
@@ -228,17 +295,68 @@ Item {
   property string layoutName: ""
   readonly property bool scrolling: root.layoutName === "scrolling"
 
+  // Trusted absolute path only, never the ambient PATH — a shadowing
+  // executable earlier on PATH must not run just because the dock polls.
+  readonly property string hyprctlBin: "/usr/bin/hyprctl"
+  readonly property int layoutProbeMaxBytes: 8192
+  readonly property int layoutProbeTimeoutMs: 2000
+  readonly property int layoutProbeKillGraceMs: 500
+  property bool layoutProbeOverflow: false
+
   function probeLayout() {
-    if (!layoutProbe.running)
-      layoutProbe.running = true
+    if (layoutProbe.running)
+      return
+    root.layoutProbeOverflow = false
+    layoutProbeDeadline.restart()
+    layoutProbe.running = true
+  }
+
+  // Hard TERM→KILL deadline: a wedged or PATH-shadowed process must not be
+  // able to sit forever or retain the process table entry.
+  Timer {
+    id: layoutProbeDeadline
+    interval: root.layoutProbeTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (layoutProbe.running) {
+        layoutProbe.signal(15) // SIGTERM
+        layoutProbeKill.restart()
+      }
+    }
+  }
+  Timer {
+    id: layoutProbeKill
+    interval: root.layoutProbeKillGraceMs
+    repeat: false
+    onTriggered: {
+      if (layoutProbe.running)
+        layoutProbe.signal(9) // SIGKILL
+    }
   }
 
   Process {
     id: layoutProbe
-    command: ["hyprctl", "getoption", "general:layout", "-j"]
+    command: [root.hyprctlBin, "getoption", "general:layout", "-j"]
+    onRunningChanged: {
+      if (!running) {
+        layoutProbeDeadline.stop()
+        layoutProbeKill.stop()
+      }
+    }
     stdout: StdioCollector {
-      waitForEnd: true
+      waitForEnd: false
+      onDataChanged: {
+        // Strict output ceiling: an excessive-output process is killed
+        // instead of letting the collector buffer it without bound.
+        if (!root.layoutProbeOverflow && text.length > root.layoutProbeMaxBytes) {
+          root.layoutProbeOverflow = true
+          layoutProbe.signal(15) // SIGTERM
+          layoutProbeKill.restart()
+        }
+      }
       onStreamFinished: {
+        if (root.layoutProbeOverflow)
+          return
         try {
           var parsed = JSON.parse(String(text || "{}"))
           root.layoutName = String(parsed.str || "").trim()

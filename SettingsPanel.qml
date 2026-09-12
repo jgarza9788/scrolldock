@@ -206,6 +206,12 @@ PanelWindow {
         }
 
         SettingToggle {
+          label: "Reserve space (push windows aside)"
+          checked: panel.dockRoot.reserveSpace
+          onToggled: panel.dockRoot.setReserveSpace(!panel.dockRoot.reserveSpace)
+        }
+
+        SettingToggle {
           label: "Auto-hide (reveal on edge hover)"
           checked: panel.dockRoot.autoHide
           onToggled: panel.dockRoot.setAutoHide(!panel.dockRoot.autoHide)

@@ -11,9 +11,12 @@ import "Model.js" as Model
 // One monitor's dock surface: a PanelWindow anchored to a single screen edge,
 // sized to its content along the long axis (centered on that edge, the usual
 // layer-shell behaviour when only one edge is anchored) and to `cellSize`
-// along the short axis. Floats over windows (`ExclusionMode.Ignore`) rather
-// than reserving screen space, so resizing / auto-hiding never reflows other
-// windows.
+// along the short axis. By default floats over windows
+// (`ExclusionMode.Ignore`), so resizing / auto-hiding never reflows other
+// windows; `dockRoot.reserveSpace` flips it to `ExclusionMode.Auto`, which
+// reserves the panel's current on-screen thickness as a layer-shell exclusive
+// zone (recomputed live, so combining this with auto-hide still reflows other
+// windows as the dock collapses/reveals).
 PanelWindow {
   id: panel
 
@@ -31,7 +34,7 @@ PanelWindow {
   // the focus-restore note by `activating` below) — a dock must never hold
   // keyboard focus outside of that explicit, momentary case.
   WlrLayershell.keyboardFocus: panel.navActive ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
-  exclusionMode: ExclusionMode.Ignore
+  exclusionMode: dockRoot.reserveSpace ? ExclusionMode.Auto : ExclusionMode.Ignore
 
   // Resolved per-screen, so `perMonitor` overrides (shell.json-only) can give
   // one monitor a different edge/size than the rest.
