@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "jgarza.scrolldock",
+  "name": "Scroll Dock",
+  "version": "1.0.0",
+  "author": "jgarza",
+  "license": "MIT",
+  "description": "A resizable, edge-anchored dock for the Hyprland scrolling layout. Every window on this monitor's active workspace is drawn as a tile sized in proportion to its on-screen extent, magnified on hover, click to focus. Can auto-hide and reveal on edge hover.",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "ScrollDock.qml"
+  }
+}
