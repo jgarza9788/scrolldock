@@ -303,6 +303,26 @@ Item {
   readonly property int layoutProbeKillGraceMs: 500
   property bool layoutProbeOverflow: false
 
+  // UTF-16 code-unit count is not byte count for non-ASCII output; measure
+  // actual UTF-8 bytes so the ceiling below means what its name says.
+  function utf8ByteLength(str) {
+    var bytes = 0
+    for (var i = 0; i < str.length; i++) {
+      var code = str.codePointAt(i)
+      if (code > 0xffff)
+        i++ // consumed the low surrogate of a pair
+      if (code <= 0x7f)
+        bytes += 1
+      else if (code <= 0x7ff)
+        bytes += 2
+      else if (code <= 0xffff)
+        bytes += 3
+      else
+        bytes += 4
+    }
+    return bytes
+  }
+
   function probeLayout() {
     if (layoutProbe.running)
       return
@@ -348,10 +368,13 @@ Item {
       onDataChanged: {
         // Strict output ceiling: an excessive-output process is killed
         // instead of letting the collector buffer it without bound.
-        if (!root.layoutProbeOverflow && text.length > root.layoutProbeMaxBytes) {
+        if (!root.layoutProbeOverflow && root.utf8ByteLength(text) > root.layoutProbeMaxBytes) {
           root.layoutProbeOverflow = true
-          layoutProbe.signal(15) // SIGTERM
-          layoutProbeKill.restart()
+          if (layoutProbe.running)
+            layoutProbe.signal(15) // SIGTERM
+          // start(), not restart(): don't push back a kill already armed by
+          // layoutProbeDeadline — the hard deadline must not be extendable.
+          layoutProbeKill.start()
         }
       }
       onStreamFinished: {
